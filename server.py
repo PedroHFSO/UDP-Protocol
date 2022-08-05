@@ -1,5 +1,6 @@
 import socket
 import sys
+import asyncio
 
 localIP     = "127.0.0.1"
 localPort   = 20001
@@ -31,4 +32,4 @@ while(True):
 
     # Sending a reply to client
     # spoiler de ACK
-    UDPServerSocket.sendto(bytesToSend, address)
+    UDPServerSocket.sendto(str.encode(str(current_ack)), address)
