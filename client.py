@@ -2,20 +2,21 @@ import socket
 import sys
 import asyncio  
 import time
+from datetime import date, datetime
 
-#Message definition--------------------
+#Definição de sequência de pacotes--------------------
 msgSequence = {
     'message': ['Primeira mensagem', 'Segundo pacote', 'ENvio 3'],
-    'serial_number' : [0], #The serial number of the first packet is 0
-    'confirmed': [False, False, False]
+    'serial_number' : [0], #Primeiro número de série é 0
+    'confirmed': [False, False, False],
+    'timestamps': [0,0,0] #Momento de envio do pacote, para testar no timeout
 }
-pkt_sent_recently = -1 #no packet was sent yet
 last_serial_number = 0
 
-for msg in msgSequence['message']:
+for msg in msgSequence['message']: #Define número de série de acordo com fluxo de bytes: Soma a quantidade de bytes de um pacote para o número de série do próximo
     byteSize = sys.getsizeof(str.encode(msg))
-    msgSequence['serial_number'].append(last_serial_number + byteSize) #Sums the bytesize of each packet to the next serial number
-    last_serial_number += byteSize #Update the last serial number
+    msgSequence['serial_number'].append(last_serial_number + byteSize) #Somando o bytesize para o próximo paacote
+    last_serial_number += byteSize 
 
 #Other params--------------------
 serverAddressPort = ("127.0.0.1", 20001)
@@ -24,16 +25,16 @@ UDPClientSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
 
 #Async functions
 async def receiveACK():
-    latestACK = '-1' #flag for no ack received
+    latestACK = '-1' #Nenhum ack recebido
     while(True):
-        await asyncio.sleep(0.5)
-        msgFromServer = UDPClientSocket.recvfrom(bufferSize)[0] #Receive message of packet
+        await asyncio.sleep(0.5) #Não sei se é necessário o sleep, ficou mais por questão de bugs com as funções assíncronas
+        msgFromServer = UDPClientSocket.recvfrom(bufferSize)[0] #Recebe ACK e converte pra int
         msgFromServer = int(msgFromServer)
-        if msgFromServer != latestACK:
+        if msgFromServer != latestACK: #Caso seja um ACK novo: executa procedimento para confirmar (ou não) pacotes
             latestACK = msgFromServer
             for i in range(len(msgSequence['message'])):
                 serial_num = msgSequence['serial_number'][i]
-                if serial_num < latestACK and latestACK in msgSequence['serial_number']:
+                if serial_num < latestACK and latestACK in msgSequence['serial_number']: #Se esse ACK for o número de série de algum pacote, confirma todos pra trás
                     msgSequence['confirmed'][i] = True
             print(msgSequence['confirmed'])
 
@@ -49,27 +50,25 @@ async def sendPackets():
     for i in range(len(msgSequence['message'])):
         msg = msgSequence['message'][i]
         serial_number = msgSequence['serial_number'][i]
-        #await asyncio.create_task(receiveACK())
-        #msgFromServer = UDPClientSocket.recvfrom(bufferSize) #tries to get ACK
-        bytesToSend = str.encode(msg)
+        msgSequence['timestamps'][i] = datetime.timestamp(datetime.now())
+        bytesToSend = str.encode(msg) #Codifica pacote
         UDPClientSocket.sendto(bytesToSend, serverAddressPort)
-        pkt_sent_recently = i #signals which packet to check for timeout
-        #task = asyncio.create_task(timeout(bytesToSend, serverAddressPort, i))
-        #await task
-        #await timeout(bytesToSend, serverAddressPort, i)
         print('Sent '+msg+' with serial number of '+str(serial_number))
 
 async def checkTimeouts():
     while(True):
-        if pkt_sent_recently:
-            pkt_sent_recently = False
-            await asyncio.sleep(4)
+        for i in range(len(msgSequence['message'])):
+            now = datetime.timestamp(datetime.now())
+            TIMEOUT_INTERVAL = 1
+            if(not msgSequence['confirmed'][i] and now - msgSequence['timestamps'] > 1 and msgSequence['timestamps'] != 0):
+                print('pacote '+str(i)+' estourou o tempo')
+                msgSequence['confirmed'][i] = True #TEM QUE RETRANSMITIR
 
-async def main():
-    task = asyncio.create_task(sendPackets())
-    task_2 = asyncio.create_task(receiveACK())
-    task_3 = asyncio.create_task(checkTimeouts())
-    await asyncio.wait([task, task_2])
+async def main(): #Chama funções para resolverem de forma concorrente
+    task = asyncio.create_task(sendPackets()) #Envio de pacotes
+    task_2 = asyncio.create_task(receiveACK()) #Recebimento de ACK
+    task_3 = asyncio.create_task(checkTimeouts()) #Teste de estouro de timeouts
+    await asyncio.wait([task, task_2, task_3])
 
 asyncio.run(main())
 

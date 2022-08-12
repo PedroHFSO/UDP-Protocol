@@ -27,7 +27,7 @@ while(True):
     clientIP  = "Cliente com  IP Address:{}".format(address)
     print(clientMsg)
     #print(clientIP)
-    current_ack += sys.getsizeof(message) #Adds size of packet to ack
+    current_ack += sys.getsizeof(message) #Adiciona tamanho do pacote ao ACK
     print('ACK Value:{}'.format(current_ack))
 
     # Sending a reply to client
