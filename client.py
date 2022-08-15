@@ -2,15 +2,35 @@ import socket
 import sys
 import asyncio  
 import time
+import random
+import string
 from datetime import date, datetime
 
 #Definição de sequência de pacotes--------------------
+# msgSequence = {
+#     'message': ['Primeira mensagem', 'Segundo pacote', 'ENvio 3'],
+#     'serial_number' : [0], #Primeiro número de série é 0
+#     'confirmed': [False, False, False],
+#     'timestamps': [0,0,0] #Momento de envio do pacote, para testar no timeout
+# }
 msgSequence = {
-    'message': ['Primeira mensagem', 'Segundo pacote', 'ENvio 3'],
-    'serial_number' : [0], #Primeiro número de série é 0
-    'confirmed': [False, False, False],
-    'timestamps': [0,0,0] #Momento de envio do pacote, para testar no timeout
+    'message': [],
+    'serial_number': [0],
+    'confirmed': [],
+    'timestamps': []
 }
+
+num_pkts = 30
+window_size = 10
+window_first = 0
+
+for i in range(num_pkts):
+    letters = string.ascii_lowercase
+    message = ''.join(random.choice(letters) for i in range(8))
+    msgSequence['message'].append(message)
+    msgSequence['confirmed'].append(False)
+    msgSequence['timestamps'].append(0)
+
 last_serial_number = 0
 
 for msg in msgSequence['message']: #Define número de série de acordo com fluxo de bytes: Soma a quantidade de bytes de um pacote para o número de série do próximo
@@ -25,6 +45,7 @@ UDPClientSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
 
 #Async functions
 async def receiveACK():
+    global window_first
     latestACK = '-1' #Nenhum ack recebido
     while(True):
         msgFromServer = UDPClientSocket.recvfrom(bufferSize)[0] #Recebe ACK e converte pra int
@@ -36,6 +57,7 @@ async def receiveACK():
                 serial_num = msgSequence['serial_number'][i]
                 if serial_num < latestACK and latestACK in msgSequence['serial_number']: #Se esse ACK for o número de série de algum pacote, confirma todos pra trás
                     msgSequence['confirmed'][i] = True
+                    window_first += 1
             print(msgSequence['confirmed'])
         await asyncio.sleep(0.1) #Round robin
 
@@ -49,12 +71,15 @@ async def timeout(bytesToSend, serverAddressPort, i):
 
 async def sendPackets():
     for i in range(len(msgSequence['message'])):
-        msg = msgSequence['message'][i]
-        serial_number = msgSequence['serial_number'][i]
-        msgSequence['timestamps'][i] = datetime.timestamp(datetime.now())
-        bytesToSend = str.encode(str(msgSequence['serial_number'][i])+'\\msg\\'+msg) #Codifica novo pacote com número de sequência + mensagem
-        print('tried to send '+msg+' with serial number of '+str(serial_number))
-        if i != 1: #Não vou transmitir o pacote [1] só pra testar o timeout
+        if i == window_first + window_size:
+             i-=1
+        else:
+            msg = msgSequence['message'][i]
+            serial_number = msgSequence['serial_number'][i]
+            msgSequence['timestamps'][i] = datetime.timestamp(datetime.now())
+            bytesToSend = str.encode(str(msgSequence['serial_number'][i])+'\\msg\\'+msg) #Codifica novo pacote com número de sequência + mensagem
+            print('tried to send '+msg+' with serial number of '+str(serial_number))
+            #if i != 1: #Não vou transmitir o pacote [1] só pra testar o timeout
             UDPClientSocket.sendto(bytesToSend, serverAddressPort)
         await asyncio.sleep(0.1)
 
