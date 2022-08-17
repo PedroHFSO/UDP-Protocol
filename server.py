@@ -15,37 +15,36 @@ UDPServerSocket.setblocking(0)
 # Bind to address and ip
 UDPServerSocket.bind((localIP, localPort))
 print("UDP server online e escutando")
+buffer = []
+bufferLimit = 1024 * 1000 * 600 #em segmentos
 
-
-async def receivePacket():
+def receivePacket():
     # Listen for incoming datagram
-    while(True):
-        try:
-            global address
-            global current_ack
-            bytesAddressPair = UDPServerSocket.recvfrom(bufferSize)
-            message = bytesAddressPair[0]
-            address = bytesAddressPair[1]
-            print('received packet')
-            serial_num, msg = message.decode('utf-8').split('\\msg\\', 1) #divide o header da mensagem
-            clientMsg = "Message do Client:{}".format(message)
-            if int(serial_num) == current_ack: #recebeu o pacote esperado: ACK = serial number
-                current_ack =  int(serial_num) + sys.getsizeof(str.encode(msg)) #Adiciona tamanho do pacote ao número serial do pacote pra retornar ACK
-        except:
-            pass
-        await asyncio.sleep(0.1)
+    try:
+        global address
+        global buffer
+        global current_ack
+        bytesAddressPair = UDPServerSocket.recvfrom(bufferSize)
+        message = bytesAddressPair[0]
+        address = bytesAddressPair[1]
+        #print('received packet')
+        serial_num, msg = message.decode('utf-8').split('\\msg\\', 1) #divide o header da mensagem
+        clientMsg = "Message do Client:{}".format(message)
+        if int(serial_num) == current_ack: #recebeu o pacote esperado: ACK = serial number
+            current_ack =  int(serial_num) + sys.getsizeof(str.encode(msg)) #Adiciona tamanho do pacote ao número serial do pacote pra retornar ACK
+            buffer.append(msg)
+            #print('ACK Value:{}'.format(current_ack))
+    except:
+        pass
 
-async def sendACK():
-    while True:
-        if address != -1:
-            print('ACK Value:{}'.format(current_ack))
-            UDPServerSocket.sendto(str.encode(str(current_ack)), address)
-        await asyncio.sleep(0.1)
-
-async def main():
-    task = asyncio.create_task(sendACK()) #Envio de ACK
-    task_2 = asyncio.create_task(receivePacket()) #Recebimento de pacotes
-    await asyncio.wait([task, task_2])
+def sendACK():
+    if address != -1:
+        UDPServerSocket.sendto(str.encode(str(current_ack)+'\\msg\\'+str(bufferLimit - len(buffer))), address)
 
 
-asyncio.run(main())
+sendACK()
+
+while True:
+    sendACK()
+    receivePacket()
+    print('buffer size: '+str(len(buffer)))
