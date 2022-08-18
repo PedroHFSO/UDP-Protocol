@@ -1,6 +1,8 @@
 import socket
 import sys
 import asyncio
+import random
+
 
 localIP     = "127.0.0.1"
 localPort   = 20001
@@ -16,11 +18,13 @@ UDPServerSocket.setblocking(0)
 UDPServerSocket.bind((localIP, localPort))
 print("UDP server online e escutando")
 buffer = []
+noLosses = True
 bufferLimit = 1024 * 1000 * 600 #em segmentos
 
 def receivePacket():
     # Listen for incoming datagram
     try:
+        #if random.randint(0,100) >= 11: #1% de chance de descartar pacote            
         global address
         global buffer
         global current_ack
@@ -29,11 +33,13 @@ def receivePacket():
         address = bytesAddressPair[1]
         #print('received packet')
         serial_num, msg = message.decode('utf-8').split('\\msg\\', 1) #divide o header da mensagem
-        clientMsg = "Message do Client:{}".format(message)
         if int(serial_num) == current_ack: #recebeu o pacote esperado: ACK = serial number
-            current_ack =  int(serial_num) + sys.getsizeof(str.encode(msg)) #Adiciona tamanho do pacote ao número serial do pacote pra retornar ACK
-            buffer.append(msg)
-            #print('ACK Value:{}'.format(current_ack))
+            if random.randint(0,10000) > 6 or noLosses: 
+                current_ack =  int(serial_num) + sys.getsizeof(str.encode(msg)) #Adiciona tamanho do pacote ao número serial do pacote pra retornar ACK
+                buffer.append(msg)
+                #print('ACK Value:{}'.format(current_ack)
+            else:
+                print('pacote '+serial_num+' descartado')
     except:
         pass
 
@@ -47,4 +53,4 @@ sendACK()
 while True:
     sendACK()
     receivePacket()
-    print('buffer size: '+str(len(buffer)))
+    #print(current_ack)

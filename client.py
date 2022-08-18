@@ -23,6 +23,7 @@ rwnd = 1000
 non_confirmed = 0 #Índice do primeiro pacote não confirmado
 n = 0 #Número de pacotes confirmados
 ssthresh = -1
+maximum_throughput = 5 #Limitação de tamannho máximo de janela para testes
 
 def defaultPackets():
     for i in range(num_pkts):
@@ -61,30 +62,33 @@ UDPClientSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
 
 def checkTimeouts():
     global window_size
-    print('check')
+    global ssthresh
+    global current_pkt
     id = -1 #índice do primeiro pacote não confirmado
     for i in range(current_pkt):
         if not msgSequence['confirmed'][i]:
             id = i
             break
     if id != -1: #apenas checar timeout se tiver algo confirmado
-        TIMEOUT_INTERVAL = 10 #10 segundos
+        TIMEOUT_INTERVAL = 3 #segundos
         now = datetime.timestamp(datetime.now())
         if(now - msgSequence['timestamps'][id] > TIMEOUT_INTERVAL and msgSequence['timestamps'][id] != 0):
-            print('pacote '+str(i)+' estourou o tempo')
-
-            for i in range(id, len(msgSequence['message'])):
-                if msgSequence['timestamps'][id] != 0: #retransmitir apenas pacotes que ja foram enviados antes
-                    now = datetime.timestamp(datetime.now()) #Recapturar timestamp e retransmitir com o mais recente possível
-                    msgSequence['timestamps'][i] = now
-                    bytesToSend = str.encode(str(msgSequence['serial_number'][i])+'\\msg\\'+msgSequence['message'][i]) #Codifica novo pacote com número de sequência + mensagem
-                    UDPClientSocket.sendto(bytesToSend, serverAddressPort)
-                    print('retransmitindo '+str(msgSequence['serial_number'][i]))
-                    window_size /= 2
-                    #msgSequence['confirmed'][i] = True #TEM QUE RETRANSMITIR
+            print('pacote '+str(id)+' estourou o tempo')
+            now = datetime.timestamp(datetime.now()) #Recapturar timestamp e retransmitir com o mais recente possível
+            msgSequence['timestamps'][id] = now
+            bytesToSend = str.encode(str(msgSequence['serial_number'][id])+'\\msg\\'+msgSequence['message'][id]) #Codifica novo pacote com número de sequência + mensagem
+            UDPClientSocket.sendto(bytesToSend, serverAddressPort)
+            print('retransmitindo '+str(msgSequence['serial_number'][id]))
+            ssthresh = ssthresh // 2
+            windows_size = 1
+            current_pkt = id
+            for j in range(id, len(msgSequence['confirmed'])):
+                if msgSequence['timestamps'][j] == 0:
+                    break
+                msgSequence['timestamps'][j] = 0
+            #msgSequence['confirmed'][i] = True #TEM QUE RETRANSMITIR        
 
 def receiveACK():
-    print('receive')
     global window_first
     global rwnd
     global non_confirmed
@@ -96,7 +100,7 @@ def receiveACK():
     ack, rwnd = msgFromServer.decode('utf-8').split('\\msg\\', 1) #divide o header da mensagem
     msgFromServer = int(ack)
     while msgFromServer != latestACK: #Busca maior ACK da janela
-        print('ack novo recebido: '+str(msgFromServer))
+        #print('ack novo recebido: '+str(msgFromServer))
         latestACK = msgFromServer
         new_acks = True 
         msgFromServer = UDPClientSocket.recvfrom(bufferSize)[0]
@@ -107,11 +111,11 @@ def receiveACK():
         for i in range(non_confirmed, len(msgSequence['message'])):
             serial_num = msgSequence['serial_number'][i]
                 
-            if serial_num <= latestACK: #Se esse ACK for o número de série de algum pacote, confirma todos pra trás
+            if serial_num < latestACK: #Se esse ACK for o número de série de algum pacote, confirma todos pra trás
                 msgSequence['confirmed'][i] = True
                 n+=1
                 if serial_num == latestACK:
-                    non_confirmed = i + 1
+                    non_confirmed = i
                     break        
         if ssthresh > 0 and window_size > ssthresh: #congestion avoidance
             window_size += 1     
@@ -121,26 +125,31 @@ def receiveACK():
             window_size = len(msgSequence['confirmed'])
         if window_size > rwnd:
             window_size = rwnd
+        if window_size > maximum_throughput:
+            window_size = maximum_throughput
 
 def sendPackets(): #envia todos os pacotes da janela de envios
     global current_pkt 
-    print('send')
-    for i in range(current_pkt, current_pkt + window_size):
+    aux = current_pkt
+    for i in range(aux, aux + window_size):
         if i < len(msgSequence['confirmed']): #há pacote para enviar / buffer de pacotes não acabou
             msg = msgSequence['message'][i]
             serial_number = msgSequence['serial_number'][i]
             msgSequence['timestamps'][i] = datetime.timestamp(datetime.now())
             bytesToSend = str.encode(str(serial_number)+'\\msg\\'+msg) #Codifica novo pacote com número de sequência + mensagem
             UDPClientSocket.sendto(bytesToSend, serverAddressPort)
-            print('tried to send '+msg+' with serial number of '+str(serial_number)+' and size of'+str(sys.getsizeof(str.encode(msg))))
+            print('tried to send '+msg+' with serial number of '+str(serial_number))
             current_pkt += 1
 
 j = 0
 filePackets()
+before = datetime.timestamp(datetime.now())
 while True:
-    j+=1
+    j+=1    
     sendPackets()
     checkTimeouts()
     receiveACK()
     if(False not in msgSequence['confirmed']): #todos os pacotes enviados com sucesso
         break
+after = datetime.timestamp(datetime.now())
+print('Executado em '+str(after - before))
